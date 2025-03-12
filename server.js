@@ -1,71 +1,42 @@
 ﻿const express = require("express");
+const admin = require("firebase-admin");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const admin = require("firebase-admin");
+require("dotenv").config();
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
 // Initialize Firebase Admin SDK
-const serviceAccount = require("./firebase-key.json");
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: "https://unity-ddc-default-rtdb.firebaseio.com",
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: process.env.DATABASE_URL
 });
 
 const db = admin.database();
-const leaderboardRef = db.ref("leaderboard");
 
-// 🏆 GET Top 10 Scores
+// Get Top 10 Scores
 app.get("/getLeaderboard", async (req, res) => {
-    try {
-        const snapshot = await leaderboardRef.orderByChild("score").limitToLast(10).once("value");
-        let leaderboard = [];
-
-        snapshot.forEach((child) => {
-            leaderboard.push(child.val());
-        });
-
-        leaderboard.sort((a, b) => b.score - a.score); // Sort highest first
-        res.json(leaderboard);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+  const ref = db.ref("leaderboard").orderByChild("score").limitToLast(10);
+  ref.once("value", (snapshot) => {
+    res.json(snapshot.val() || {});
+  });
 });
 
-// 📝 POST New Score (Only adds if it's in the top 10)
+// Submit Score
 app.post("/updateLeaderboard", async (req, res) => {
-    try {
-        const { player, score } = req.body;
+  const { name, score } = req.body;
+  if (!name || score === undefined) return res.status(400).send("Invalid data");
 
-        const snapshot = await leaderboardRef.orderByChild("score").once("value");
-        let leaderboard = [];
+  const ref = db.ref("leaderboard");
+  const newEntry = ref.push();
+  await newEntry.set({ name, score });
 
-        snapshot.forEach((child) => {
-            leaderboard.push({ id: child.key, ...child.val() });
-        });
-
-        leaderboard.sort((a, b) => b.score - a.score);
-
-        if (leaderboard.length < 10 || score > leaderboard[leaderboard.length - 1].score) {
-            if (leaderboard.length >= 10) {
-                await leaderboardRef.child(leaderboard[leaderboard.length - 1].id).remove();
-            }
-
-            await leaderboardRef.push({ player, score });
-            res.json({ message: "Leaderboard updated!" });
-        } else {
-            res.json({ message: "Score not high enough to be added." });
-        }
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+  res.send("Leaderboard updated!");
 });
 
-// Start Server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
